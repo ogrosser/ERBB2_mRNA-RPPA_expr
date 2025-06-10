@@ -1,0 +1,279 @@
+---
+title: ERBB2 mRNA and RPPA protein expression in TCGA-BRCA
+author: "Author: Ondine Grosser"
+date: "Last update: `r format(Sys.time(), '%d %B, %Y')`" 
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    fig_caption: yes
+    code_folding: hide
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Important Note
+Make sure the following libraries downloaded to your workspace before running any of the below code.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library("data.table")
+library("DT")
+library("dplyr")
+```
+
+Before answering the questions below I read the clinical data, mRNA expression data, and RPPA protein expression data into my workspace.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+#Clinical data
+clin.data <- read.csv('TCGA_BRCA_clinical_data.csv', sep=',', header = T)
+datatable(head(as.data.frame(clin.data),10), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px", autoWidth = TRUE))
+#mRNA expression data
+mRNA.data <- read.csv('TCGA_BRCA_mRNA_expression.csv', sep=',', header = T)
+datatable(head(as.data.frame(mRNA.data),10), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px", autoWidth = TRUE))
+#RPPA expression data
+RPPA.data <- read.csv('TCGA_BRCA_RPPA_protein_expression.csv', sep=',', header = T)
+datatable(head(as.data.frame(RPPA.data),10), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px", autoWidth = TRUE))
+```
+
+**Side Note:** Both mRNA.data and RPPA.data are not normally distributed, so I will use a Mann-Whitney U test instead of a t-test. The Shapiro-Wilk test for mRNA.data only covers the first 5000 rows because that is the limit of the function sample size.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+#Shapiro-Wilk test for mRNA expression data distribution
+normal <- 0
+not.normal <- 0
+for (i in 2:207) { #for all columns in data set except X column
+    #if p-value is greater than 0.05, column is normally distributed
+    if (shapiro.test(as.numeric(mRNA.data[1:5000, i]))$p > 0.05) {
+        normal <- normal + 1
+    }else {
+        not.normal <- not.normal + 1
+    }
+}
+normal; not.normal
+#Shapiro-Wilk test for RPPA protein expression data distribution
+normal <- 0
+not.normal <- 0
+for (i in 2:107) { #for all columns in data set except outcome column
+    #if p-value is greater than 0.05, column is normally distributed
+    if (shapiro.test(as.numeric(RPPA.data[[i]]))$p > 0.05) {
+        normal <- normal + 1
+    }else {
+        not.normal <- not.normal + 1
+    }
+}
+normal; not.normal
+```
+
+# Question 1
+**Investigate whether the ERBB2 (HER2) mRNA expression is significantly different between normal and tumor tissues. Perform both an unpaired t-test and a paired t-test. Clearly explain the results from each test and discuss which test is more appropriate for answering this question. Ensure that you state the null hypothesis clearly and indicate whether you accept or reject it based on the results obtained.**
+
+I made a variable containing the expression data from the 'ERBB2' row from mRNA.data. Then I made a dataframe with the values from the normal/tumor tissues in different columns. The normal tissues have an ID ending in "11" and the tumor tissues have an ID ending in "01".
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+#ERBB2 mRNA expression in all tissue samples
+ERBB2 <- mRNA.data[mRNA.data$X=='ERBB2', ]
+#First 30 columns
+datatable(as.data.frame(ERBB2[, 1:30]), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, autoWidth = TRUE))
+#ERBB2 expression in normal tissues
+ERBB2.n <- as.numeric(ERBB2[, grep("11", names(ERBB2), value = TRUE)])
+#ERBB2 expression in tumor tissues
+ERBB2.t <- as.numeric(ERBB2[, grep("01", names(ERBB2), value = TRUE)])
+ERBB2.split <- data.frame(Tumor=ERBB2.t, Normal=ERBB2.n)
+datatable(head(as.data.frame(ERBB2.split),10), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px", autoWidth = TRUE))
+```
+
+The null hypothesis for the Mann Whitney U test is that there is no significant difference in ERBB2 expression between normal and tumor tissues. The unpaired Mann Whiteney U test gives a p-value of 7.562e-07 and the paired Mann Whitney U test gives a p-value of 7.558e-08. Both Mann Whitney U tests give p-values less than 0.05 and reject the null hypothesis. The best t-test to use in this case is the unpaired Mann Whitney U test because the two mRNA expression groups (normal and tumor) are independent of each other.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+#Unpaired Mann Whitney U test
+wilcox.test(ERBB2.split$Normal, ERBB2.split$Tumor)
+#Paired Mann Whitney U test
+wilcox.test(ERBB2.split$Normal, ERBB2.split$Tumor, paired = TRUE)
+```
+
+# Question 2
+**Analyze the correlation between ERBB2 (HER2) mRNA expression and RPPA protein levels in HER2-IHC negative patients. Calculate both the Pearson and Spearman correlation coefficients, along with their respective p-values, for ERBB2 mRNA and RPPA protein levels. Clearly explain the results from each correlation method and discuss which method is more appropriate for this analysis. Ensure you state the null hypothesis clearly and indicate whether you accept or reject it based on the results obtained.**
+
+First I found which patients were HER2-IHC negative, not counting the ones with NA values.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+#Only HER2-IHC negative patients
+clin.data.2 <- clin.data[clin.data$IHCHER2=='Negative', ]
+#Excluding NA values
+clin.data.2 <- na.exclude(clin.data.2)
+clin.data.2$Patient_ID
+```
+
+Then I made a variable containing the RPPA protein expression data for ERBB2.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+#ERBB2 RPPA protein expression in all tissue samples
+ERBB2.R <- RPPA.data[RPPA.data$X=="ERBB2", ]
+datatable(as.data.frame(ERBB2.R[, 1:30]), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, autoWidth = TRUE))
+```
+
+Then I made vectors of the values from ERBB2 and ERBB2.R that matched clin.data.2$Patient_ID. Since the RPPA data set only contains tumor tissue samples, both vectors will only contain expression levels from tumor tissue samples.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+ERBB2.HER2 <- character(0) #mRNA expression of HER2 neg. patients
+ERBB2.R.HER2 <- character(0) #protein expression of HER2 neg. patients
+for (i in clin.data.2$Patient_ID) {
+    ERBB2.HER2 <- append(ERBB2.HER2, as.numeric(ERBB2[grep(i, colnames(ERBB2))[1]]))
+    ERBB2.R.HER2 <- append(ERBB2.R.HER2, as.numeric(ERBB2.R[grep(i, colnames(ERBB2.R))]))
+}
+```
+
+After making a dataframe containing the above vectors, I calculated both the Pearson and Spearman correlation coefficients and kept the p-values. The null hypothesis is that there is no signficant correlation between the ERBB2 mRNA expression and ERBB2 RPPA protein expression in HER2-IHC negative patients. Both correlation coefficients are positive, which means that both tests show a positive correlation. Both p-values are below 0.05, which means that the null hypothesis should be rejected. Therefore, according to both tests there is a significant positive correlation between the mRNA expression and RPPA protein expression. Since the all of the data is not normally distributed, the Spearman test would be better. This is because the Spearman test is nonparametric while the Pearson test is parametric.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+HER2 <- data.frame(E.mRNA=ERBB2.HER2, E.RPPA=ERBB2.R.HER2)
+datatable(head(as.data.frame(HER2),10), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px", autoWidth = TRUE))
+#Pearson correlation test
+cor.test(as.numeric(HER2$E.mRNA), as.numeric(HER2$E.RPPA), method = "pearson")
+#Spearman correlation test
+cor.test(as.numeric(HER2$E.mRNA), as.numeric(HER2$E.RPPA), method = "spearman")
+```
+
+# Question 3
+**In breast cancer diagnostics, HER2 and ER statuses are critical biomarkers that influence treatment decisions. Oncologists are interested in the relationship between HER2-IHC and ER-IHC statuses in breast cancer patients. Please perform a test to determine if there is a significant association between HER2 and ER statuses in these patients. Ensure you state the null hypothesis clearly and indicate whether you accept or reject the null hypothesis based on the results obtained. (Only consider IHC positive and negative records, and remove NA, equivocal, and indeterminate records).**
+
+First I made a fixed.status data frame that contains the tissue samples where both ER and HER2 are either positive or negative. Then I made a table with ER_Status_By_IHC and IHCHER2 column data and performed a chi-square test. The null hypothesis is that there is no significant association between HER2 and ER statuses among patients. The p-value is 1, which means that the null hypothesis should not be rejected and that there is no signficant association between HER2 and ER statuses.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+status <- c("Positive", "Negative")
+#Only positive and negative ER patients
+clin.data.ER <- filter(clin.data, grepl(paste(status, collapse='|'), ER_Status_By_IHC))
+#Only patients where both ER and HER2 are positive/negative
+fixed.status <- filter(clin.data.ER, grepl(paste(status, collapse='|'), IHCHER2))
+datatable(head(as.data.frame(fixed.status),10), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px", autoWidth = TRUE))
+#Table containing frequencies of HER2/ER status pairs
+stat <- data.frame(ER=fixed.status$ER_Status_By_IHC, HER2=fixed.status$IHCHER2)
+stat.table <- table(stat); stat.table
+chisq.test(stat.table)
+```
+
+# Question 4
+**Please construct a regression model with “fraction genome altered” as the input and “tumor mutation burden” (TMB_nonsynonymous) as the output. Calculate the 95% confidence interval for the regression coefficients. Explain the coefficients, their 95% CI, and the associated p-value for fraction genome altered. Additionally, explain the R-squared value and why it’s important for a regression model.**
+
+First I made a q.four data frame that contains the data from the above two columns in clin.data. Then I made a linear model with "fraction genome altered" as the input (ie. independant variable) and "TMB_nonsynonymous" as the output (ie. dependant variable). The 95% confidence interval range for the input is very large, which indicates the sample size of 103 patients is not an accurate representation of the population. The input coefficient indicates a positive correlation between the input and the output, meaning when the input increases, the output also increases.. The p-value is less than 0.05, which means the association between the input and the output is significant. All of this means that there is a significant positive correlation between the amount of genome that is altered and the amount of mutations in the tumor DNA. 
+An R-squared value (aka coefficient of determination) indicates the percentage of variance in the dependent variable that can be explained by the independent variable, and also indicates whether the model is a good fit. The multiple R-squared value shows exactly that, while the adjusted R-squared adjusts for the amount of input variables in the data set. Since this data set only has one independent variable, the multiple R-squared value will be used. This shows that only 5.8% of variance in tumor DNA mutation can be explained by the amount of genome that is altered. And since the R-squared is so low, this means that this linear model is not a good fit for the data. This is shown visually in the below scatter plot.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+q.four <- data.frame(I=clin.data$Fraction_Genome_Altered, O=clin.data$TMB_nonsynonymous)
+q.four <- na.exclude(q.four)
+datatable(head(as.data.frame(q.four),10), filter = 'top', options = list(pageLength = 10, scrollX = TRUE, scrollY = "400px", autoWidth = TRUE))
+q.four.lm <- lm(O~I, q.four)
+confint(q.four.lm)
+summary(q.four.lm)
+#Predicted vs observed values
+plot(q.four$I, q.four$O, xlab="Fraction Genome Altered", ylab="TMB_nonsynonymous")
+points(q.four$I, predict(q.four.lm), col="red", pch=20)
+```
+
+# Question 5
+**Identify the genes most positively correlated with ERBB2 in normal and cancer samples. Write code to calculate the pearson correlation between ERBB2 and all genes in the mRNA expression table for normal and tumor samples separately. Save all correlation coefficients and p-values for each gene and perform multiple hypothesis testing correction for the p-values. Report the top 10 correlated genes in both the normal and tumor groups, including their correlation coefficients and p-adjust values.**
+
+I made a for loop that performed separate Spearman tests comparing the ERBB2 gene expression with the rest of the genes for normal and tumor tissue samples. I chose the Spearman test because the data is not normally distributed.
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+pn <- character(0); pt <- character(0) #p-value variables
+pvn <- character(0); pvt <- character(0) #p-value vectors
+Cn <- character(0); Ct <- character(0) #correlation coeff. variables
+Cvn <- character(0); Cvt <- character(0) #correlation coeff. vectors
+spear.n <- character(0); spear.t <- character(0) #Spearman correlation test variables
+for (i in 1:nrow(mRNA.data)) {
+  #Spearman correlation test for normal tissues
+    spear.n <- cor.test(ERBB2.n, as.numeric(mRNA.data[i, grep("11", names(mRNA.data), value = TRUE)]), method = "spearman")
+    pn <- as.numeric(spear.n$p.value) #P-value
+    pvn <- append(pvn, pn) #Append to p-value vector
+    Cn <- as.numeric(spear.n$estimate) #correlation coeff.
+    Cvn <- append(Cvn, Cn) #Append to correlation coeff. vector
+  #Spearman correlation test for tumor tissues
+    spear.t <- cor.test(ERBB2.t, as.numeric(mRNA.data[i, grep("01", names(mRNA.data), value = TRUE)]), method = "spearman")
+    pt <- as.numeric(spear.t$p.value) #P-value
+    pvt <- append(pvt, pt) #Append to p-value vector
+    Ct <- as.numeric(spear.t$estimate) #correlation coeff.
+    Cvt <- append(Cvt, Ct) #Append to correlation coeff. vector
+}
+```
+
+After adjusting the normal and tumor tissue p-values, I determined the top 10 correlated genes plus their correlation coefficients and p-values. For the correlated genes in normal tissue, the stronger the correlation to ERBB2, the more statistically significant said correlation is. The gene with the strongest correlation to ERBB2 is itself with a correlation coefficient of of 1 and an adjusted p-value of 0, and the gene with the 10th strongest correlation is LMAN1L with a correlation coefficient of 0.910345 and an adjusted p-value of 3.45371e-3. The same trend occurs for the correlated genes in tumor tissue, except for the gene with the 10th strongest correlation. The gene with the strongest correlation to ERBB2 is itself with a correlation coefficient of 1 and an adjusted p-value of 0, and the gene with the 10th strongest correlation is PIP5K1A with a correlation coefficient of 0.579416 and an adjusted p-value of 0. For the normal tissue, the only gene with an adjusted p-value of 0 is ERBB2, but for the tumor tissue there are multiple genes with adjusted p-values of 0 (ERBB2, PGAP3, OSBP2, MED27, PIP5K1A). 
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, class.source="fold-show"}
+#Adjusted normal tissue p-values
+pvn.adj <- p.adjust(pvn, method = "bonferroni")
+#Adjusted tumor tissue p-values
+pvt.adj <- p.adjust(pvt, method = "bonferroni")
+count <- 10 #Counter for below while loop
+i <- 0 #Counter for gene index
+#Temp vectors
+temp.pn <- pvn.adj
+temp.Cn <- Cvn
+temp.pt <- pvt.adj
+temp.Ct <- Cvt
+#Vectors for top 10 genes and their corresponding correlation coeffs. and p-values
+genes.n <- character(0) #Genes for normal tissue
+genes.t <- character(0) #Genes for tumor tissue
+p.values.n <- character(0) #P-values for normal tissue
+p.values.t <- character(0) #P-values for tumor tissue
+corr.n <- character(0) #Correlation coeffs for normal tissue
+corr.t <- character(0) #Correlation coeffs for tumor tissue
+#Top 10 genes with correlation coefficients and p-values:
+while (count > 0) { #While count is greater than 0:
+  if (count == 0) { #If count equals 0, break loop
+    break
+  }else {
+    #Append genes with max correlation coefficients
+    genes.n <- append(genes.n, mRNA.data[which.max(temp.Cn) + i, 1])
+    genes.t <- append(genes.t, mRNA.data[which.max(temp.Ct) + i, 1])
+    #Append p-values with max correlation coefficients
+    p.values.n <- append(p.values.n, temp.pn[which.max(temp.Cn)])
+    p.values.t <- append(p.values.t, temp.pt[which.max(temp.Ct)])
+    #Append max correlation coefficients
+    corr.n <- append(corr.n, temp.Cn[which.max(temp.Cn)])
+    corr.t <- append(corr.t, temp.Ct[which.max(temp.Ct)])
+    #Remove max p-values and coefficents
+    temp.pn <- temp.pn[-which.max(temp.Cn)]
+    temp.Cn <- temp.Cn[-which.max(temp.Cn)]
+    temp.pt <- temp.pt[-which.max(temp.Ct)]
+    temp.Ct <- temp.Ct[-which.max(temp.Ct)]
+    i <- i + 1 #To be added to next top gene index
+    count <- count - 1 #While loop counter decreases
+  }
+}
+#Top 10 positively correlated genes to ERBB2 mRNA expression in normal tissue in order of descending correlation:
+for (i in 1:10) {
+  print(paste(genes.n[i], "has a correlation coefficient of", signif(as.numeric(corr.n[i], 7)), "and a p-value of", signif(as.numeric(p.values.n[i], 7))))
+}
+#Plot of Coefficients
+plot(corr.n, xlab="Top 10 Genes", ylab="Correlation Coefficient", main="Top 10 Genes by Correlation Coefficient in Normal Tissue")
+pos_vector <- rep(3, length(genes.n))
+pos_vector[genes.n %in% genes.n[1]] <- 4 #Every gene label except the first one is as position 3
+text(corr.n, labels=genes.n, cex = 0.6, pos = pos_vector)
+#Plot of p-values
+plot(p.values.n, xlab="Top 10 Genes", ylab="Correlation Coefficient", main="P-values of Top 10 Genes by Correlation Coefficient in Normal Tissue")
+pos_vector <- rep(3, length(genes.n))
+pos_vector[genes.n %in% genes.n[10]] <- 1 #Every gene label except the 10th one is at position 3
+text(p.values.n, labels=genes.n, cex = 0.6, pos = pos_vector)
+#Top 10 positively correlated genes to ERBB2 mRNA expression in tumor tissue in order of descending correlation:
+for (i in 1:10) {
+  print(paste(genes.t[i], "has a correlation coefficient of",
+signif(as.numeric(corr.t[i], 7)), "and a p-value of", signif(as.numeric(p.values.t[i], 7))))
+}
+#Plot of coefficients
+plot(corr.t, xlab="Top 10 Genes", ylab="Correlation Coefficient", main="Top 10 Genes by Correlation Coefficient in Tumor Tissue")
+pos_vector <- rep(3, length(genes.t))
+pos_vector[genes.t %in% genes.t[1]] <- 4 #Every gene label except the first one is at position 3
+text(corr.t, labels=genes.t, cex = 0.6, pos = pos_vector)
+#Plot of p-values
+plot(p.values.t, xlab="Top 10 Genes", ylab="P-values", main="P-values of Top 10 Genes by Correlation Coefficient in Tumor Tissue")
+pos_vector <- rep(3, length(genes.t))
+pos_vector[genes.t %in% genes.t[9]] <- 1 #Every gene label except the 9th one is at position 3
+text(p.values.t, labels=genes.t, cex = 0.6, pos = pos_vector)
+```
+
+
